@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+*.log
+.env
+.venv/
+venv/
+online-index.js
+online-index.css
+lt.log
+server.out.log
+server.err.log
