@@ -103,10 +103,10 @@ function Header() {
             <button type="button" id="homeLogo" class="text-3xl font-bold text-joybuy-red">Joybuy</button>
             <div class="flex-1 max-w-2xl">${SearchBox()}</div>
             <div class="flex items-center gap-6 text-sm">
-              <button id="deliveryButton" class="flex items-center gap-1 hover:text-joybuy-red">📍 Livrer à ${escapeHtml(deliveryCode)}</button>
-              <button id="languageButton" class="flex items-center gap-1 hover:text-joybuy-red">FR ${escapeHtml(selectedLanguage)}</button>
-              <button id="loginButton" class="hover:text-joybuy-red">Se connecter</button>
-              <button id="cartButton" class="flex items-center gap-1 hover:text-joybuy-red">🛒 Panier${cartItems.length ? ` (${cartItems.length})` : ""}</button>
+              <button type="button" id="deliveryButton" class="flex items-center gap-1 hover:text-joybuy-red">📍 Livrer à ${escapeHtml(deliveryCode)}</button>
+              <button type="button" id="languageButton" class="flex items-center gap-1 hover:text-joybuy-red">FR ${escapeHtml(selectedLanguage)}</button>
+              <button type="button" id="loginButton" class="hover:text-joybuy-red">Se connecter</button>
+              <button type="button" id="cartButton" class="flex items-center gap-1 hover:text-joybuy-red">🛒 Panier${cartItems.length ? ` (${cartItems.length})` : ""}</button>
             </div>
           </div>
         </div>
@@ -435,6 +435,10 @@ function bindEvents() {
 
   document.getElementById("homeLogo")?.addEventListener("click", goHome);
   document.getElementById("backHome")?.addEventListener("click", goHome);
+  document.getElementById("deliveryButton")?.addEventListener("click", () => openHeaderPanel("delivery"));
+  document.getElementById("languageButton")?.addEventListener("click", () => openHeaderPanel("language"));
+  document.getElementById("loginButton")?.addEventListener("click", () => openHeaderPanel("login"));
+  document.getElementById("cartButton")?.addEventListener("click", () => openHeaderPanel("cart"));
 
   form?.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -453,12 +457,12 @@ function bindEvents() {
   input?.addEventListener("focus", () => {
     if (view === "home") {
       showTrends = true;
-      render();
+      trendBox?.classList.remove("hidden");
     }
   });
   input?.addEventListener("blur", () => setTimeout(() => {
     showTrends = false;
-    render();
+    trendBox?.classList.add("hidden");
   }, 200));
 
   document.querySelectorAll(".trend").forEach((button) => {
@@ -486,8 +490,12 @@ function bindEvents() {
 
   document.querySelectorAll(".add-cart").forEach((button) => {
     button.addEventListener("click", async () => {
-      await api("/api/cart", {});
-      showToast("Produit ajouté au panier.", "success");
+      const product = findProduct(button.dataset.id);
+      await api("/api/cart", { productId: button.dataset.id });
+      if (product) {
+        cartItems.push(product);
+      }
+      showToast("Produit ajoute au panier.", "success");
     });
   });
 
@@ -501,6 +509,38 @@ function bindEvents() {
       activeModalProduct = product ? normalizeProduct(product) : null;
       render();
     });
+  });
+
+  document.querySelector("[data-close-panel='true']")?.addEventListener("click", (event) => {
+    if (event.target?.dataset?.closePanel === "true") {
+      closeHeaderPanel();
+    }
+  });
+  document.querySelectorAll(".close-panel").forEach((button) => {
+    button.addEventListener("click", closeHeaderPanel);
+  });
+  document.querySelectorAll(".delivery-preset").forEach((button) => {
+    button.addEventListener("click", () => {
+      const deliveryInput = document.getElementById("deliveryInput");
+      if (deliveryInput) deliveryInput.value = button.dataset.code || deliveryCode;
+    });
+  });
+  document.getElementById("saveDelivery")?.addEventListener("click", () => {
+    const nextCode = document.getElementById("deliveryInput")?.value.trim();
+    if (nextCode) deliveryCode = nextCode;
+    closeHeaderPanel();
+    showToast(`Livraison mise a jour : ${deliveryCode}`, "success");
+  });
+  document.querySelectorAll(".language-option").forEach((button) => {
+    button.addEventListener("click", () => {
+      selectedLanguage = button.dataset.lang || selectedLanguage;
+      closeHeaderPanel();
+      showToast(`Langue selectionnee : ${selectedLanguage}`, "success");
+    });
+  });
+  document.getElementById("demoLogin")?.addEventListener("click", () => {
+    closeHeaderPanel();
+    showToast("Connexion de demonstration activee.", "success");
   });
 
   document.getElementById("modalBackdrop")?.addEventListener("click", (event) => {
@@ -518,6 +558,25 @@ function bindEvents() {
     toast = null;
     render();
   });
+}
+
+function openHeaderPanel(panel) {
+  headerPanel = panel;
+  activeModalProduct = null;
+  toast = null;
+  render();
+}
+
+function closeHeaderPanel() {
+  headerPanel = null;
+  render();
+}
+
+function findProduct(productId) {
+  if (!productId || !result) return null;
+  const allProducts = [...(result.recommendations || []), ...(result.products || [])];
+  const product = allProducts.find((item) => item.id === productId);
+  return product ? normalizeProduct(product) : null;
 }
 
 function goHome() {
