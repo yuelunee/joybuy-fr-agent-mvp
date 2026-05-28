@@ -14,6 +14,15 @@ let selectedLanguage = "FR";
 let deliveryCode = "75007";
 let cartItems = [];
 
+const SEARCH_SUGGESTIONS = [
+  { label: "telephone", query: "telephone ecouteurs Bluetooth enceinte portable" },
+  { label: "ecouteurs Bluetooth", query: "ecouteurs Bluetooth reduction de bruit moins de 80 euros" },
+  { label: "couverture chauffante", query: "couverture chauffante electrique reassort automatique" },
+  { label: "croquettes chat", query: "croquettes chat litiere reassort automatique" },
+  { label: "beaute soin visage", query: "produits de beaute soin visage" },
+  { label: "cuiseur vapeur", query: "cuiseur vapeur petit electromenager cuisine" },
+];
+
 const CATEGORY_QUERIES = {
   "Beauté": "produits de beauté soin visage",
   "Électroménager": "petit électroménager cuisine maison",
@@ -123,13 +132,19 @@ function Header() {
 }
 
 function SearchBox() {
+  const suggestions = SEARCH_SUGGESTIONS.filter((item) => {
+    const value = query.trim().toLowerCase();
+    return !value || item.label.toLowerCase().includes(value) || item.query.toLowerCase().includes(value);
+  }).slice(0, 5);
+
   return `
-    <div class="relative">
+    <div class="relative search-shell">
       <form id="searchForm" class="relative">
         <input
           type="text"
           id="searchInput"
           value="${escapeHtml(query)}"
+          autocomplete="off"
           placeholder="Décrivez ce que vous cherchez en français..."
           class="w-full px-4 py-3 pr-32 border border-gray-300 rounded-lg focus:outline-none focus:border-joybuy-red"
           ${isSearching ? "disabled" : ""}
@@ -143,10 +158,21 @@ function SearchBox() {
           Rechercher
         </button>
       </form>
-      <div id="trendBox" class="mt-2 bg-white border border-gray-200 rounded-lg shadow-lg p-4 ${showTrends && view === "home" ? "" : "hidden"}">
-        <div class="text-sm text-gray-600 mb-2">Tendances :</div>
-        <div class="flex flex-wrap gap-2">
-          ${["téléphone", "toilette", "enceinte portable", "décoration murale", "cuiseur vapeur"].map((item) => `<button class="trend px-3 py-1 bg-gray-100 rounded-full text-sm hover:bg-gray-200" data-value="${item}">${item}</button>`).join("")}
+      <div id="trendBox" class="absolute top-full left-0 right-0 mt-2 bg-white border border-gray-200 rounded-lg shadow-xl p-4 z-50 ${showTrends ? "" : "hidden"}">
+        <div class="flex items-center justify-between mb-3">
+          <div class="text-sm text-gray-600">Suggestions de recherche</div>
+          <button type="button" id="closeSuggestions" class="text-gray-500 hover:text-gray-800 text-xl leading-none">×</button>
+        </div>
+        <div class="space-y-2">
+          ${suggestions.map((item) => `
+            <button type="button" class="trend w-full text-left px-3 py-2 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors" data-value="${escapeHtml(item.query)}">
+              <span class="font-medium text-gray-900">${escapeHtml(item.label)}</span>
+              <span class="block text-xs text-gray-500">${escapeHtml(item.query)}</span>
+            </button>
+          `).join("")}
+        </div>
+        <div class="flex flex-wrap gap-2 mt-3">
+          ${["telephone", "toilette", "enceinte portable", "decoration murale", "cuiseur vapeur"].map((item) => `<button type="button" class="trend px-3 py-1 bg-red-100 text-joybuy-red rounded-full text-sm hover:bg-gray-200" data-value="${escapeHtml(item)}">${escapeHtml(item)}</button>`).join("")}
         </div>
       </div>
       ${isSearching ? `<div class="absolute top-full left-0 right-0 mt-2 h-1 bg-gray-200 rounded-full overflow-hidden"><div class="h-full bg-joybuy-red progress-bar"></div></div>` : ""}
@@ -253,6 +279,8 @@ function RecommendationGrid(items) {
             <div class="text-2xl font-bold text-joybuy-red mb-2">${item.price} €</div>
             <p class="text-sm text-gray-500 mb-3 line-clamp-2">${escapeHtml(item.recommendation_reason)}</p>
             <button class="add-cart w-full bg-joybuy-red text-white py-2 rounded-lg hover:bg-red-700 transition-colors" data-id="${escapeHtml(item.id)}">Ajouter au panier</button>
+            ${item.is_standard_product && !activatedAgents.has(item.id) ? `<button class="activate-agent w-full text-xs text-joybuy-red hover:underline flex items-center justify-center gap-1 mt-2" data-id="${escapeHtml(item.id)}">🔄 Configurer le réapprovisionnement automatique</button>` : ""}
+            ${item.is_standard_product && activatedAgents.has(item.id) ? `<button class="cancel-agent w-full text-xs text-gray-600 hover:text-joybuy-red hover:underline flex items-center justify-center gap-1 mt-2" data-id="${escapeHtml(item.id)}">Annuler le réapprovisionnement</button>` : ""}
           </div>
         `).join("")}
       </div>
@@ -280,7 +308,8 @@ function ProductGrid(items) {
             <div class="space-y-2">
               <button class="add-cart w-full bg-joybuy-red text-white py-2 rounded-lg hover:bg-red-700 transition-colors text-sm" data-id="${escapeHtml(item.id)}">Ajouter au panier</button>
               <button class="view-product w-full border border-gray-300 text-gray-700 py-2 rounded-lg hover:border-joybuy-red hover:text-joybuy-red transition-colors text-sm">Voir le produit</button>
-              ${item.is_standard_product && !activatedAgents.has(item.id) ? `<button class="activate-agent w-full text-xs text-joybuy-red hover:underline flex items-center justify-center gap-1 mt-2" data-id="${item.id}">🔄 Configurer le réapprovisionnement automatique</button>` : ""}
+              ${item.is_standard_product && !activatedAgents.has(item.id) ? `<button class="activate-agent w-full text-xs text-joybuy-red hover:underline flex items-center justify-center gap-1 mt-2" data-id="${escapeHtml(item.id)}">🔄 Configurer le réapprovisionnement automatique</button>` : ""}
+              ${item.is_standard_product && activatedAgents.has(item.id) ? `<button class="cancel-agent w-full text-xs text-gray-600 hover:text-joybuy-red hover:underline flex items-center justify-center gap-1 mt-2" data-id="${escapeHtml(item.id)}">Annuler le réapprovisionnement</button>` : ""}
             </div>
           </div>
         `).join("")}
@@ -349,21 +378,27 @@ function HeaderPanel() {
   }
 
   if (headerPanel === "cart") {
+    const total = cartItems.reduce((sum, item) => sum + Number(String(item.price).replace(",", ".")), 0);
     return `
       <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" data-close-panel="true">
         <div class="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 animate-scale-in" data-panel-card="true">
           <div class="border-b border-gray-200 p-6">
             <h2 class="text-xl font-bold text-joybuy-red">Panier</h2>
-            <p class="text-sm text-gray-500 mt-1">${cartItems.length ? `${cartItems.length} article(s)` : "Votre panier est vide."}</p>
+            <p class="text-sm text-gray-500 mt-1">${cartItems.length ? `${cartItems.length} article(s) - Total ${euro(total)} euros` : "Votre panier est vide."}</p>
           </div>
           <div class="p-6 space-y-4">
-            ${cartItems.length ? cartItems.map((item) => `
+            ${cartItems.length ? cartItems.map((item, index) => `
               <div class="flex items-center justify-between gap-3 border border-gray-200 rounded-lg p-3">
-                <span class="text-sm font-medium">${escapeHtml(item.name)}</span>
-                <span class="text-joybuy-red font-bold">${escapeHtml(item.price)} €</span>
+                <div>
+                  <span class="block text-sm font-medium">${escapeHtml(item.name)}</span>
+                  <span class="block text-joybuy-red font-bold">${escapeHtml(item.price)} euros</span>
+                </div>
+                <button type="button" class="remove-cart text-sm text-gray-500 hover:text-joybuy-red" data-index="${index}">Retirer</button>
               </div>
-            `).join("") : `<div class="bg-gray-50 rounded-lg p-4 text-gray-600">Ajoutez un produit depuis les résultats.</div>`}
-            <button class="close-panel w-full bg-joybuy-red text-white py-3 rounded-lg hover:bg-red-700 transition-colors font-medium">${cartItems.length ? "Continuer mes achats" : "Fermer"}</button>
+            `).join("") : `<div class="bg-gray-50 rounded-lg p-4 text-gray-600">Ajoutez un produit depuis les resultats.</div>`}
+            ${cartItems.length ? `<button id="checkoutCart" class="w-full bg-joybuy-red text-white py-3 rounded-lg hover:bg-red-700 transition-colors font-medium">Passer au paiement</button>` : ""}
+            ${cartItems.length ? `<button id="clearCart" class="w-full border border-gray-300 text-gray-700 py-3 rounded-lg hover:border-joybuy-red hover:text-joybuy-red transition-colors font-medium">Annuler le panier</button>` : ""}
+            <button class="close-panel w-full text-gray-600 hover:text-gray-800 text-sm">${cartItems.length ? "Continuer mes achats" : "Fermer"}</button>
           </div>
         </div>
       </div>
@@ -450,15 +485,21 @@ function bindEvents() {
     input.blur();
     await runSearch(nextQuery);
   });
+  form?.addEventListener("pointerdown", () => {
+    showTrends = true;
+    trendBox?.classList.remove("hidden");
+  });
 
   input?.addEventListener("input", () => {
     query = input.value;
   });
   input?.addEventListener("focus", () => {
-    if (view === "home") {
-      showTrends = true;
-      trendBox?.classList.remove("hidden");
-    }
+    showTrends = true;
+    trendBox?.classList.remove("hidden");
+  });
+  input?.addEventListener("click", () => {
+    showTrends = true;
+    trendBox?.classList.remove("hidden");
   });
   input?.addEventListener("blur", () => setTimeout(() => {
     showTrends = false;
@@ -466,6 +507,7 @@ function bindEvents() {
   }, 200));
 
   document.querySelectorAll(".trend").forEach((button) => {
+    button.addEventListener("mousedown", (event) => event.preventDefault());
     button.addEventListener("click", async () => {
       query = button.dataset.value;
       showTrends = false;
@@ -505,9 +547,16 @@ function bindEvents() {
 
   document.querySelectorAll(".activate-agent").forEach((button) => {
     button.addEventListener("click", () => {
-      const product = (result.products || []).find((item) => item.id === button.dataset.id);
+      const product = [...(result?.recommendations || []), ...(result?.products || [])].find((item) => item.id === button.dataset.id);
       activeModalProduct = product ? normalizeProduct(product) : null;
       render();
+    });
+  });
+
+  document.querySelectorAll(".cancel-agent").forEach((button) => {
+    button.addEventListener("click", () => {
+      activatedAgents.delete(button.dataset.id);
+      showToast("Réapprovisionnement automatique annulé.", "success");
     });
   });
 
@@ -541,6 +590,27 @@ function bindEvents() {
   document.getElementById("demoLogin")?.addEventListener("click", () => {
     closeHeaderPanel();
     showToast("Connexion de demonstration activee.", "success");
+  });
+  document.querySelectorAll(".remove-cart").forEach((button) => {
+    button.addEventListener("click", () => {
+      cartItems.splice(Number(button.dataset.index), 1);
+      render();
+    });
+  });
+  document.getElementById("clearCart")?.addEventListener("click", () => {
+    cartItems = [];
+    closeHeaderPanel();
+    showToast("Panier annulé.", "success");
+  });
+  document.getElementById("checkoutCart")?.addEventListener("click", () => {
+    const count = cartItems.length;
+    cartItems = [];
+    closeHeaderPanel();
+    showToast(`Commande de démonstration validée : ${count} article(s).`, "success");
+  });
+  document.getElementById("closeSuggestions")?.addEventListener("click", () => {
+    showTrends = false;
+    trendBox?.classList.add("hidden");
   });
 
   document.getElementById("modalBackdrop")?.addEventListener("click", (event) => {
