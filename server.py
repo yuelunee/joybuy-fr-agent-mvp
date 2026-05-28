@@ -18,6 +18,8 @@ ROOT = Path(__file__).resolve().parent
 WEB_ROOT = ROOT / "web"
 CATALOG_PATH = ROOT / "data" / "joybuy_catalog.json"
 SESSIONS: dict[str, dict] = {}
+MAX_CLARIFICATION_TURNS = 2
+REPURCHASE_CATEGORIES = {"Animalerie", "Epicerie et maison", "Best of Asie"}
 
 
 @dataclass
@@ -51,6 +53,13 @@ SYNONYMS = {
     "chat": ["croquettes", "animalerie", "pet"],
     "lessive": ["capsules", "linge", "menage"],
     "reapprovisionnement": ["reachat", "recurrent", "tous les mois"],
+    "chien": ["croquettes", "animalerie", "dog"],
+    "beaute": ["soin", "visage", "serum", "creme", "cosmetique"],
+    "telephone": ["smartphone", "coque", "chargeur", "usb-c", "powerbank"],
+    "cuiseur": ["vapeur", "cuisine", "electromenager"],
+    "aspirateur": ["menage", "maison", "sans sac"],
+    "ramen": ["nouilles", "asie", "asiatique"],
+    "sport": ["fitness", "yoga", "sante", "bien-etre"],
 }
 
 
@@ -59,6 +68,30 @@ def expand_terms(words: set[str]) -> set[str]:
     for word in list(words):
         expanded.update(SYNONYMS.get(word, []))
     return expanded
+
+
+def infer_cross_language_hints(message: str) -> str:
+    """Small deterministic bridge for PRD examples where source/query terms cross Chinese and French."""
+    hints: list[str] = []
+    rules = [
+        ("怕冷", "froid chaud chauffant hiver frileux"),
+        ("爸爸", "papa pere cadeau"),
+        ("礼物", "cadeau offrir"),
+        ("上学", "ecole etudiant scolaire"),
+        ("书包", "sac cartable a4"),
+        ("防水", "impermeable waterproof pluie"),
+        ("猫粮", "chat croquettes reapprovisionnement"),
+        ("猫砂", "chat litiere reapprovisionnement"),
+        ("狗粮", "chien croquettes reapprovisionnement"),
+        ("洗衣", "lessive linge reapprovisionnement"),
+        ("耳机", "ecouteurs bluetooth high-tech"),
+        ("手机", "telephone chargeur coque"),
+        ("蒸锅", "cuiseur vapeur electromenager cuisine"),
+    ]
+    for needle, hint in rules:
+        if needle in message:
+            hints.append(hint)
+    return " ".join(hints)
 
 
 class SimulatedJoybuyProductAPI:
@@ -141,7 +174,7 @@ def parse_budget(text: str) -> float | None:
 
 
 def parse_intent(message: str, history: list[str] | None = None) -> dict:
-    text = normalize(message)
+    text = normalize(f"{message} {infer_cross_language_hints(message)}")
     words = tokenize(text)
     history = history or []
     intent = {
@@ -160,16 +193,16 @@ def parse_intent(message: str, history: list[str] | None = None) -> dict:
     }
 
     category_rules = [
-        ("Beauté", ["beaute", "soin", "visage", "cosmetique", "serum"]),
-        ("Électroménager", ["electromenager", "aspirateur", "cuisine", "mixeur", "airfryer"]),
-        ("Gaming", ["gaming", "casque", "souris", "clavier", "gamer"]),
-        ("Chaleur et confort", ["froid", "chaud", "chauffant", "hiver", "bouillotte", "frileux"]),
-        ("Sacs et bagages", ["sac", "cartable", "ecole", "a4", "dos", "backpack"]),
-        ("High-Tech", ["ecouteur", "ecouteurs", "bluetooth", "telephone", "enceinte", "anc", "bruit", "metro"]),
-        ("Animalerie", ["chat", "chien", "croquette", "croquettes", "animal"]),
-        ("Epicerie et maison", ["lessive", "detergent", "menage", "capsule", "capsules"]),
-        ("Best of Asie", ["asie", "asiatique", "ramen", "snacks", "matcha"]),
-        ("Sport, Santé et Bien-être", ["sport", "sante", "bien", "yoga", "fitness"]),
+        ("Beaute", ["beaute", "soin", "visage", "cosmetique", "serum", "creme", "demaquillant", "bioderma", "garnier", "roche"]),
+        ("Electromenager", ["electromenager", "aspirateur", "cuisine", "mixeur", "airfryer", "friteuse", "vapeur", "cuiseur", "blender"]),
+        ("Gaming", ["gaming", "casque", "souris", "clavier", "gamer", "razer", "logitech", "steelseries"]),
+        ("Chaleur et confort", ["froid", "chaud", "chauffant", "hiver", "bouillotte", "frileux", "thermique", "heattech"]),
+        ("Sacs et bagages", ["sac", "cartable", "ecole", "a4", "dos", "backpack", "ordinateur", "lycee", "etudiant"]),
+        ("High-Tech", ["ecouteur", "ecouteurs", "bluetooth", "telephone", "enceinte", "anc", "bruit", "metro", "chargeur", "coque", "batterie", "usb"]),
+        ("Animalerie", ["chat", "chien", "croquette", "croquettes", "litiere", "animal", "purina", "royal", "catsan"]),
+        ("Epicerie et maison", ["lessive", "detergent", "menage", "capsule", "capsules", "vaisselle", "eau", "cafe", "essuie", "courses"]),
+        ("Best of Asie", ["asie", "asiatique", "ramen", "snacks", "matcha", "nouilles", "nissin", "nongshim"]),
+        ("Sport, Sante et Bien-etre", ["sport", "sante", "bien", "yoga", "fitness", "tensiometre", "massage", "halteres"]),
     ]
     for category, terms in category_rules:
         if words & set(terms):
@@ -240,6 +273,36 @@ def keyword_generator(intent: dict) -> list[str]:
     return keywords[:18]
 
 
+def check_intent_completeness(intent: dict) -> dict:
+    """Rule-based guardrail mirroring the PRD check_intent_completeness tool."""
+    blocking_fields = list(intent.get("missing_fields", []))
+    complete = intent.get("completeness_score", 0) >= 0.62 and not blocking_fields
+    return {
+        "complete": complete,
+        "missing_fields": blocking_fields,
+        "score": intent.get("completeness_score", 0),
+    }
+
+
+def product_classifier(product: dict) -> dict:
+    """Classify whether the transaction agent may handle automatic replenishment."""
+    is_standard = bool(product.get("standard_product") or product.get("repurchasable"))
+    low_emotion = product.get("emotional_value", "medium") == "low"
+    stable_price = product.get("price_stability", "medium") in {"high", "medium"}
+    eligible_category = product.get("category") in REPURCHASE_CATEGORIES
+    eligible = is_standard and low_emotion and stable_price and eligible_category and product.get("price", 999) <= 80
+    reasons = []
+    if is_standard:
+        reasons.append("standard_product")
+    if low_emotion:
+        reasons.append("low_emotional_value")
+    if stable_price:
+        reasons.append("stable_price")
+    if eligible_category:
+        reasons.append("repurchase_category")
+    return {"eligible": eligible, "reasons": reasons}
+
+
 def rrf_merge(result_sets: list[list[SearchHit]], k: int = 60) -> list[dict]:
     scores: dict[str, float] = defaultdict(float)
     products: dict[str, dict] = {}
@@ -276,7 +339,9 @@ def entropy_calculator(products: list[dict]) -> dict:
     }
 
 
-def question_generator(intent: dict, entropy: dict) -> dict | None:
+def question_generator(intent: dict, entropy: dict, turn_count: int = 0) -> dict | None:
+    if turn_count >= MAX_CLARIFICATION_TURNS:
+        return None
     asked = " ".join(intent.get("clarification_history", []))
     if "category" in intent["missing_fields"] and "category" not in asked:
         return {
@@ -369,36 +434,46 @@ def recommendation_generator(products: list[dict], intent: dict) -> list[dict]:
 
 def search_response(message: str, session_id: str | None = None, history: list[str] | None = None) -> dict:
     session_id = session_id or str(uuid.uuid4())
+    history = history or []
     intent = parse_intent(message, history)
+    completeness = check_intent_completeness(intent)
 
     keyword_hits = PRODUCT_API.keyword_search(intent["keywords"])
     semantic_hits = PRODUCT_API.semantic_search(intent)
     filtered_hits = PRODUCT_API.structured_filter(intent)
     merged = rrf_merge([keyword_hits, semantic_hits, filtered_hits])
     entropy = entropy_calculator(merged[:8])
-    clarification = question_generator(intent, entropy)
+    clarification = question_generator(intent, entropy, len(history))
+    forced_search = bool(history and len(history) >= MAX_CLARIFICATION_TURNS)
     ranked = recommendation_generator(merged[:12], intent)
     products = ranked[:8]
     comparison = diff_comparator(products)
 
-    SESSIONS[session_id] = {"intent": intent, "turns": len(history or []) + 1}
+    SESSIONS[session_id] = {"intent": intent, "turns": len(history) + 1}
     return {
         "sessionId": session_id,
         "agents": [
+            {"name": "Master Agent", "status": "done", "detail": "Orchestration intent -> search -> recommendation"},
             {"name": "Intent Agent", "status": "done", "detail": f"Score {intent['completeness_score']}"},
+            {"name": "Completeness Tool", "status": "done", "detail": "Complete" if completeness["complete"] else f"Missing {','.join(completeness['missing_fields'])}"},
             {"name": "Search Agent", "status": "done", "detail": f"KW {len(keyword_hits)} / SEM {len(semantic_hits)} / FIL {len(filtered_hits)}"},
-            {"name": "Clarification Agent", "status": "done", "detail": "Question prete" if clarification else "Pas de blocage"},
-            {"name": "Recommendation Agent", "status": "done", "detail": "RRF + comparaison"},
+            {"name": "Clarification Agent", "status": "done", "detail": "Question prete" if clarification else ("Limite atteinte, recherche forcee" if forced_search else "Pas de blocage")},
+            {"name": "Product Explainer Agent", "status": "done", "detail": "Descriptions FR generees"},
+            {"name": "Recommendation Agent", "status": "done", "detail": "RRF + comparaison personnalisee"},
         ],
         "intent": intent,
+        "intent_completeness": completeness,
         "search_pipeline": {
             "keyword_search": len(keyword_hits),
             "semantic_search": len(semantic_hits),
             "structured_filter": len(filtered_hits),
             "rrf_merged": len(merged),
             "entropy": entropy,
+            "clarification_turn": len(history),
+            "max_clarification_turns": MAX_CLARIFICATION_TURNS,
+            "forced_search": forced_search,
             "catalog_source": "data/joybuy_catalog.json",
-            "adapter": "SimulatedJoybuyProductAPI",
+            "adapter": "SimulatedJoybuyProductAPI(realistic_mock_catalog)",
         },
         "clarification": clarification,
         "comparison": comparison,
@@ -419,7 +494,12 @@ class JoybuyHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/api/health":
-            self.send_json({"ok": True, "service": "joybuy-agent-api", "catalog_size": len(PRODUCT_API.products)})
+            self.send_json({
+                "ok": True,
+                "service": "joybuy-agent-api",
+                "catalog_size": len(PRODUCT_API.products),
+                "prd_alignment": ["intent_parser", "keyword_search", "semantic_search", "structured_filter", "rrf_merge", "clarification_limit_2", "product_explainer", "recommendation_generator", "product_classifier", "repurchase_executor"],
+            })
             return
         if self.path == "/api/catalog":
             self.send_json({"products": PRODUCT_API.all_products(), "source": "simulated"})
@@ -455,14 +535,17 @@ class JoybuyHandler(BaseHTTPRequestHandler):
                 if not product:
                     self.send_json({"error": "unknown product"}, 404)
                     return
-                if not product.get("repurchasable"):
+                classification = product_classifier(product)
+                if not classification["eligible"]:
                     self.send_json({
                         "ok": False,
+                        "classification": classification,
                         "message": "Ce produit sera traite par le paiement classique: il n'est pas eligible au reapprovisionnement automatique.",
                     })
                     return
                 self.send_json({
                     "ok": True,
+                    "classification": classification,
                     "message": "Agent de reapprovisionnement active. Il preparera recherche, comparaison, panier et demandera confirmation avant paiement.",
                     "rule": {
                         "product": product["name"],
@@ -475,7 +558,24 @@ class JoybuyHandler(BaseHTTPRequestHandler):
                 return
 
             if self.path == "/api/cart":
-                self.send_json({"ok": True, "message": "Produit ajoute au panier de demonstration."})
+                product_id = payload.get("productId")
+                product = next((p for p in PRODUCT_API.products if p["id"] == product_id), None)
+                self.send_json({
+                    "ok": True,
+                    "message": "Produit ajoute au panier de demonstration.",
+                    "line": {"productId": product_id, "name": product["name"] if product else None},
+                })
+                return
+
+            if self.path == "/api/checkout":
+                items = payload.get("items", [])
+                self.send_json({
+                    "ok": True,
+                    "status": "payment_confirmation_required",
+                    "message": "Commande preparee. Conformement au PRD, le paiement reste a confirmer par l'utilisateur.",
+                    "items": items,
+                    "payment_policy": "confirm_before_payment",
+                })
                 return
 
             self.send_json({"error": "not found"}, 404)

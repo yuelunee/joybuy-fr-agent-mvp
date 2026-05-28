@@ -602,11 +602,12 @@ function bindEvents() {
     closeHeaderPanel();
     showToast("Panier annulé.", "success");
   });
-  document.getElementById("checkoutCart")?.addEventListener("click", () => {
+  document.getElementById("checkoutCart")?.addEventListener("click", async () => {
     const count = cartItems.length;
+    await api("/api/checkout", { items: cartItems.map((item) => ({ id: item.id, name: item.name, price: item.price })) });
     cartItems = [];
     closeHeaderPanel();
-    showToast(`Commande de démonstration validée : ${count} article(s).`, "success");
+    showToast(`Commande préparée : ${count} article(s), paiement à confirmer.`, "success");
   });
   document.getElementById("closeSuggestions")?.addEventListener("click", () => {
     showTrends = false;
